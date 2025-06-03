@@ -11,6 +11,11 @@ config :fara_tracker,
   ecto_repos: [FaraTracker.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# OpenAI configuration
+config :openai_ex,
+  api_key: System.get_env("OPENAI_API_KEY"),
+  organization_key: System.get_env("OPENAI_ORGANIZATION_KEY")
+
 # Configures the endpoint
 config :fara_tracker, FaraTrackerWeb.Endpoint,
   url: [host: "localhost"],
@@ -20,7 +25,7 @@ config :fara_tracker, FaraTrackerWeb.Endpoint,
     layout: false
   ],
   pubsub_server: FaraTracker.PubSub,
-  live_view: [signing_salt: "HmepD3D0"]
+  live_view: [signing_salt: "pz7zGJrt"]
 
 # Configures the mailer
 #

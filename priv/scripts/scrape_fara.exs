@@ -188,15 +188,25 @@ defmodule FaraScraper do
       {:ok, local_path} ->
         Logger.info("✅ Downloaded: #{Path.basename(local_path)}")
 
-        # Extract data with AI (placeholder)
-        extracted_data = extract_data_with_ai_placeholder(doc, local_path)
+        # Extract data with AI
+        case FaraTracker.PdfProcessor.extract_data(local_path, doc) do
+          {:ok, extracted_data} ->
+            # Return processed data
+            %{
+              document: doc,
+              local_path: local_path,
+              extracted_data: extracted_data
+            }
 
-        # Return processed data
-        %{
-          document: doc,
-          local_path: local_path,
-          extracted_data: extracted_data
-        }
+          {:error, reason} ->
+            Logger.warning("⚠️ Failed to extract data from #{Path.basename(local_path)}: #{reason}")
+            # Return processed data with fallback
+            %{
+              document: doc,
+              local_path: local_path,
+              extracted_data: extract_fallback_data(doc)
+            }
+        end
 
       {:error, reason} ->
         Logger.warning("⚠️ Failed to download #{doc.url}: #{reason}")
@@ -249,14 +259,14 @@ defmodule FaraScraper do
     end
   end
 
-  defp extract_data_with_ai_placeholder(doc, _local_path) do
-    Logger.info("🤖 AI extraction placeholder for #{doc.document_type}")
+  defp extract_fallback_data(doc) do
+    Logger.info("🤖 AI extraction fallback for #{doc.document_type}")
 
     # Mock extracted data based on document info
     %{
-      agent_name: doc.registrant_name,
-      foreign_principal: doc.foreign_principal_name,
-      country: doc.foreign_principal_country,
+      agent_name: doc.registrant_name || "Unknown Agent",
+      foreign_principal: doc.foreign_principal_name || "Unknown Principal",
+      country: doc.foreign_principal_country || "Unknown",
       total_compensation: Enum.random(100_000..2_000_000) |> Decimal.new(),
       services_description: generate_mock_services(doc.document_type),
       registration_date: doc.date_stamped,

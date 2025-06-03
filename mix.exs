@@ -54,6 +54,7 @@ defmodule FaraTracker.MixProject do
       {:finch, "~> 0.13"},
       {:req, "~> 0.4"},
       {:nimble_csv, "~> 1.2"},
+      {:openai_ex, "~> 0.8.3"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 0.26"},
