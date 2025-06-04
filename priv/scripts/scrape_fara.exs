@@ -21,7 +21,7 @@ defmodule FaraScraper do
 
   @csv_file "priv/FARA_All_RegistrantDocs.csv"
   @downloads_dir "tmp/fara_downloads"
-  @rate_limit_ms 2000  # 2 seconds between requests - be respectful
+  @rate_limit_ms 300  # 500ms between requests - faster processing
   @user_agent "FARA-Transparency-Tool/1.0 (Public Interest Research)"
 
   def run(opts \\ []) do
@@ -31,10 +31,11 @@ defmodule FaraScraper do
     limit = Keyword.get(opts, :limit, 5)
     agent_filter = Keyword.get(opts, :agent_filter, nil)
     years_back = Keyword.get(opts, :years_back, 10)
+    target_year = Keyword.get(opts, :target_year, nil)
 
     try do
       # Step 1: Read and filter CSV data
-      documents = read_and_filter_csv(limit, agent_filter, years_back)
+      documents = read_and_filter_csv(limit, agent_filter, years_back, target_year)
       Logger.info("📋 Found #{length(documents)} documents to process")
 
       if length(documents) == 0 do
@@ -66,10 +67,13 @@ defmodule FaraScraper do
   end
 
   # Step 1: Read CSV and filter data
-  defp read_and_filter_csv(limit, agent_filter, years_back) do
+  defp read_and_filter_csv(limit, agent_filter, years_back, target_year) do
     Logger.info("📖 Reading CSV file: #{@csv_file}")
 
-    cutoff_date = Date.add(Date.utc_today(), -(years_back * 365))
+    cutoff_date = case target_year do
+      nil -> Date.add(Date.utc_today(), -(years_back * 365))
+      year when is_integer(year) -> Date.new!(year, 1, 1)
+    end
 
     # Use a simpler approach due to malformed escaping in the CSV
     lines = File.read!(@csv_file) |> String.split("\n")
@@ -78,12 +82,18 @@ defmodule FaraScraper do
     # Parse header
     headers = parse_csv_line(header_line)
 
-    data_lines
+    filtered_docs = data_lines
     |> Enum.filter(&(&1 != ""))  # Remove empty lines
     |> Enum.map(&parse_csv_line/1)
     |> Enum.map(&parse_csv_row(&1, headers))
-    |> Enum.filter(&filter_document(&1, cutoff_date, agent_filter))
-    |> Enum.take(limit)
+    |> Enum.filter(&filter_document(&1, cutoff_date, agent_filter, target_year))
+
+    # Apply limit - use all documents if limit is 0 or negative
+    if limit > 0 do
+      Enum.take(filtered_docs, limit)
+    else
+      filtered_docs
+    end
   end
 
   defp parse_csv_line(line) do
@@ -133,9 +143,12 @@ defmodule FaraScraper do
     end
   end
 
-  defp filter_document(doc, cutoff_date, agent_filter) do
+  defp filter_document(doc, cutoff_date, agent_filter, target_year) do
     # Filter by date
-    date_ok = Date.compare(doc.date_stamped, cutoff_date) != :lt
+    date_ok = case target_year do
+      nil -> Date.compare(doc.date_stamped, cutoff_date) != :lt
+      year when is_integer(year) -> doc.date_stamped.year == year
+    end
 
     # Filter by agent name if specified
     agent_ok = case agent_filter do
@@ -286,23 +299,25 @@ defmodule FaraScraper do
   defp store_results(results) do
     Logger.info("💾 Storing #{length(results)} registrations in database...")
 
-    # Group by registrant and combine data
+    # Group by BOTH agent AND foreign principal to create separate registrations per relationship
     registrations =
       results
-      |> Enum.group_by(& &1.extracted_data.agent_name)
-      |> Enum.map(fn {_agent_name, docs} ->
-        # Use the most recent document's data as base
+      |> Enum.group_by(fn result ->
+        {result.extracted_data.agent_name, result.extracted_data.foreign_principal, result.extracted_data.country}
+      end)
+      |> Enum.map(fn {{agent_name, foreign_principal, country}, docs} ->
+        # Use the most recent document's data as base for this specific relationship
         latest_doc = Enum.max_by(docs, & &1.extracted_data.registration_date, Date)
 
-        # Collect all document URLs for this agent
+        # Collect all document URLs for this specific agent-principal relationship
         all_urls = docs |> Enum.map(& &1.document.url) |> Enum.uniq()
 
-        # Sum all compensation across all documents for this agent
+        # Sum all compensation across all documents for this specific relationship
         total_compensation = docs
         |> Enum.map(& &1.extracted_data.total_compensation)
         |> Enum.reduce(Decimal.new("0"), &Decimal.add/2)
 
-        Logger.debug("💰 Agent: #{latest_doc.extracted_data.agent_name}, Documents: #{length(docs)}, Total Compensation: $#{Decimal.to_string(total_compensation)}")
+        Logger.debug("💰 Agent: #{agent_name}, Principal: #{foreign_principal}, Country: #{country}, Documents: #{length(docs)}, Total Compensation: $#{Decimal.to_string(total_compensation)}")
 
         # Merge the latest doc data with aggregated values
         latest_doc.extracted_data
@@ -316,7 +331,7 @@ defmodule FaraScraper do
       |> Enum.count(&match?({:ok, _}, &1))
 
     Logger.info("✅ Successfully stored #{success_count}/#{length(registrations)} registrations")
-    Logger.info("💰 Compensation aggregation: summed values across all documents per agent")
+    Logger.info("💰 Compensation aggregation: summed values per agent-principal relationship")
   end
 
   defp store_single_registration(data) do
@@ -383,15 +398,17 @@ case System.argv() do
     ✗ Skips: Informational Materials, Dissemination reports
 
     Options:
-      --limit N           Limit to N documents (default: 5)
+      --limit N           Limit to N documents (default: 5, use 0 for no limit)
       --agent AGENT_NAME  Filter to specific agent/firm name (partial match)
       --years N           Look back N years (default: 10)
+      --target-year Y     Filter to documents from year Y
       --help              Show this help
 
     Examples:
       mix run priv/scripts/scrape_fara.exs --limit 3 --agent "Brownstein"
       mix run priv/scripts/scrape_fara.exs --limit 10 --years 5
       mix run priv/scripts/scrape_fara.exs --agent "Akin Gump" --limit 2
+      mix run priv/scripts/scrape_fara.exs --target-year 2025 --limit 0
     """)
 
   args ->
@@ -421,7 +438,17 @@ case System.argv() do
           end
       end
 
-    case FaraScraper.run(limit: limit, agent_filter: agent_filter, years_back: years_back) do
+    target_year =
+      case Enum.find_index(args, & &1 == "--target-year") do
+        nil -> nil
+        index ->
+          case Enum.at(args, index + 1) do
+            nil -> nil
+            value -> String.to_integer(value)
+          end
+      end
+
+    case FaraScraper.run(limit: limit, agent_filter: agent_filter, years_back: years_back, target_year: target_year) do
       {:ok, count} ->
         IO.puts("✅ Successfully processed #{count} documents")
         System.halt(0)

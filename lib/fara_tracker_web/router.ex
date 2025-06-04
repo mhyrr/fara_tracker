@@ -18,6 +18,7 @@ defmodule FaraTrackerWeb.Router do
     pipe_through :browser
 
     live "/", DashboardLive, :index
+    live "/about", AboutLive, :index
     get "/home", PageController, :home
   end
 
