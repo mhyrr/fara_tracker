@@ -3,3 +3,75 @@
 @import "tailwindcss/utilities";
 
 /* This file is for your main application CSS */
+
+/* FARA Tracker Custom Colors */
+:root {
+  --fara-primary: #33c1b1;
+  --fara-secondary: #F58B00;
+  --fara-dark: #1A2F38;
+  --fara-primary-light: rgba(51, 193, 177, 0.1);
+  --fara-secondary-light: rgba(245, 139, 0, 0.1);
+  --fara-dark-light: rgba(26, 47, 56, 0.1);
+}
+
+/* Custom component styles */
+.fara-card-shadow {
+  box-shadow: 0 10px 15px -3px rgba(26, 47, 56, 0.1), 0 4px 6px -2px rgba(26, 47, 56, 0.05);
+}
+
+.fara-card-shadow-xl {
+  box-shadow: 0 20px 25px -5px rgba(26, 47, 56, 0.1), 0 10px 10px -5px rgba(26, 47, 56, 0.04);
+}
+
+.fara-gradient-bg {
+  background: linear-gradient(135deg, rgba(51, 193, 177, 0.5) 0%, rgba(245, 139, 0, 0.5) 100%);
+}
+
+.fara-agent-row-bg {
+  background: linear-gradient(135deg, var(--fara-primary-light) 0%, var(--fara-secondary-light) 100%);
+}
+
+/* Smooth transitions for interactive elements */
+.fara-transition {
+  transition: all 0.2s ease-in-out;
+}
+
+.fara-transition-slow {
+  transition: all 0.3s ease-in-out;
+}
+
+/* Hover effects */
+.fara-hover-scale:hover {
+  transform: scale(1.05);
+}
+
+.fara-doc-link {
+  background-color: var(--fara-primary-light);
+  color: var(--fara-primary);
+  transition: all 0.2s ease-in-out;
+}
+
+.fara-doc-link:hover {
+  transform: scale(1.1);
+  background-color: var(--fara-primary);
+  color: white;
+}
+
+/* Custom scrollbar for tables */
+.fara-scrollbar::-webkit-scrollbar {
+  height: 8px;
+}
+
+.fara-scrollbar::-webkit-scrollbar-track {
+  background: var(--fara-dark-light);
+  border-radius: 4px;
+}
+
+.fara-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--fara-primary);
+  border-radius: 4px;
+}
+
+.fara-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--fara-secondary);
+}
