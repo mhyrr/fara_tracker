@@ -22,18 +22,34 @@ defmodule FaraTracker.Fara do
   @doc """
   Gets country summary data for the dashboard.
   """
-  def get_country_summary do
-    query = """
-    SELECT
-      country,
-      COUNT(*) as agent_count,
-      COALESCE(SUM(total_compensation), 0) as total_spending,
-      MAX(updated_at) as last_updated
-    FROM fara_registrations
-    WHERE status = 'active'
-    GROUP BY country
-    ORDER BY total_spending DESC
-    """
+  def get_country_summary(year \\ "all") do
+    query = case year do
+      "all" ->
+        """
+        SELECT
+          country,
+          COUNT(*) as agent_count,
+          COALESCE(SUM(total_compensation), 0) as total_spending,
+          MAX(updated_at) as last_updated
+        FROM fara_registrations
+        WHERE status = 'active'
+        GROUP BY country
+        ORDER BY total_spending DESC
+        """
+
+      year_string ->
+        """
+        SELECT
+          country,
+          COUNT(*) as agent_count,
+          COALESCE(SUM(total_compensation), 0) as total_spending,
+          MAX(updated_at) as last_updated
+        FROM fara_registrations
+        WHERE status = 'active' AND EXTRACT(year FROM registration_date) = #{year_string}
+        GROUP BY country
+        ORDER BY total_spending DESC
+        """
+    end
 
     case Repo.query(query) do
       {:ok, result} -> format_country_results(result)
@@ -102,20 +118,27 @@ defmodule FaraTracker.Fara do
   @doc """
   Gets detailed agent information for a specific country.
   """
-  def get_agents_by_country(country) do
-    query = from r in Registration,
-             where: r.country == ^country and r.status == "active",
-             order_by: [desc: r.registration_date, asc: r.agent_name],
-             select: %{
-               id: r.id,
-               agent_name: r.agent_name,
-               foreign_principal: r.foreign_principal,
-               status: r.status,
-               registration_date: r.registration_date,
-               total_compensation: r.total_compensation,
-               latest_period_end: r.latest_period_end,
-               document_urls: r.document_urls
-             }
+  def get_agents_by_country(country, year \\ "all") do
+    base_query = from r in Registration,
+                 where: r.country == ^country and r.status == "active",
+                 order_by: [desc: r.registration_date, asc: r.agent_name],
+                 select: %{
+                   id: r.id,
+                   agent_name: r.agent_name,
+                   foreign_principal: r.foreign_principal,
+                   status: r.status,
+                   registration_date: r.registration_date,
+                   total_compensation: r.total_compensation,
+                   latest_period_end: r.latest_period_end,
+                   document_urls: r.document_urls
+                 }
+
+    query = case year do
+      "all" -> base_query
+      year_string ->
+        year_int = String.to_integer(year_string)
+        from r in base_query, where: fragment("EXTRACT(year FROM ?)", r.registration_date) == ^year_int
+    end
 
     Repo.all(query)
   end

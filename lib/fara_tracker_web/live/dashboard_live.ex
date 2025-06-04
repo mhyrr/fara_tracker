@@ -3,23 +3,31 @@ defmodule FaraTrackerWeb.DashboardLive do
   alias FaraTracker.Fara
 
   def mount(_params, _session, socket) do
-    countries = Fara.get_country_summary()
-
     socket =
       socket
-      |> assign(:countries, countries)
+      |> assign(:selected_year, "all")
       |> assign(:expanded_countries, MapSet.new())
       |> assign(:country_agents, %{})
-      |> assign(:total_countries, length(countries))
-      |> assign(:total_agents, Enum.sum(Enum.map(countries, & &1.agent_count)))
-      |> assign(:total_spending, Enum.reduce(countries, Decimal.new("0"), &Decimal.add(&2, &1.total_spending)))
+      |> load_data_for_year("all")
 
     {:ok, socket}
+  end
+
+  def handle_event("switch_year", %{"year" => year}, socket) do
+    socket =
+      socket
+      |> assign(:selected_year, year)
+      |> assign(:expanded_countries, MapSet.new())  # Reset expanded countries when switching years
+      |> assign(:country_agents, %{})  # Reset agents data
+      |> load_data_for_year(year)
+
+    {:noreply, socket}
   end
 
   def handle_event("toggle_country", %{"country" => country}, socket) do
     expanded_countries = socket.assigns.expanded_countries
     country_agents = socket.assigns.country_agents
+    selected_year = socket.assigns.selected_year
 
     {new_expanded, new_agents} =
       if MapSet.member?(expanded_countries, country) do
@@ -27,7 +35,7 @@ defmodule FaraTrackerWeb.DashboardLive do
         {MapSet.delete(expanded_countries, country), Map.delete(country_agents, country)}
       else
         # Expand: add to expanded set and load agents data
-        agents = Fara.get_agents_by_country(country)
+        agents = Fara.get_agents_by_country(country, selected_year)
         {MapSet.put(expanded_countries, country), Map.put(country_agents, country, agents)}
       end
 
@@ -39,15 +47,53 @@ defmodule FaraTrackerWeb.DashboardLive do
     {:noreply, socket}
   end
 
+  defp load_data_for_year(socket, year) do
+    countries = Fara.get_country_summary(year)
+
+    socket
+    |> assign(:countries, countries)
+    |> assign(:total_countries, length(countries))
+    |> assign(:total_agents, Enum.sum(Enum.map(countries, & &1.agent_count)))
+    |> assign(:total_spending, Enum.reduce(countries, Decimal.new("0"), &Decimal.add(&2, &1.total_spending)))
+  end
+
   def render(assigns) do
     ~H"""
     <div class="max-w-full mx-auto py-6 sm:px-6 lg:px-8 bg-gray-50 min-h-screen">
       <div class="px-4 py-6 sm:px-0">
-        <div class="text-center mb-12">
+        <div class="text-center mb-6">
           <h1 class="text-4xl font-bold text-gray-900 mb-4">
             FARA Foreign Agent Tracker
           </h1>
           <div class="w-24 h-1 bg-gradient-to-r from-teal-500 to-orange-500 mx-auto rounded-full"></div>
+          <div class="mt-3">
+            <.link navigate={~p"/about"} class="text-xs text-gray-500 hover:text-gray-700 transition-colors duration-200">
+              A vibecoding experiment in &lt; 5 hours
+            </.link>
+          </div>
+        </div>
+
+        <!-- Year Filter Tabs -->
+        <div class="flex justify-center mb-10">
+          <div class="inline-flex rounded-lg p-1 fara-year-tabs">
+            <%= for {year, label} <- [{"all", "All Years"}, {"2025", "2025"}, {"2024", "2024"}, {"2023", "2023"}] do %>
+              <button
+                phx-click="switch_year"
+                phx-value-year={year}
+                title={if year == "all", do: "Based on all agent documentation", else: "Based on agent documentation delivered in #{year}"}
+                class={[
+                  "px-6 py-3 text-sm font-semibold rounded-md fara-transition",
+                  if @selected_year == year do
+                    "text-white fara-tab-active"
+                  else
+                    "text-gray-700 fara-tab-inactive"
+                  end
+                ]}
+              >
+                <%= label %>
+              </button>
+            <% end %>
+          </div>
         </div>
 
         <!-- Summary Stats -->
@@ -115,22 +161,22 @@ defmodule FaraTrackerWeb.DashboardLive do
           <!-- Desktop Table Layout (hidden on mobile) -->
           <div class="hidden md:block border-t" style="border-color: #1A2F38;">
             <div class="overflow-x-auto fara-scrollbar">
-              <table class="min-w-full table-auto divide-y" style="border-color: #1A2F38;">
+              <table class="min-w-full divide-y" style="border-color: #1A2F38; table-layout: fixed;">
                 <thead style="background-color: rgba(26, 47, 56, 0.05);">
                   <tr>
-                    <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider min-w-64" style="color: #1A2F38;">
+                    <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider" style="color: #1A2F38; width: 35%;">
                       Country / Agent
                     </th>
-                    <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider min-w-24" style="color: #1A2F38;">
+                    <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider" style="color: #1A2F38; width: 15%;">
                       Count / Status
                     </th>
-                    <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider min-w-40" style="color: #1A2F38;">
+                    <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider" style="color: #1A2F38; width: 20%;">
                       Total Compensation
                     </th>
-                    <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider min-w-32" style="color: #1A2F38;">
+                    <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider" style="color: #1A2F38; width: 15%;">
                       Last Updated / Registration Date
                     </th>
-                    <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider min-w-32" style="color: #1A2F38;">
+                    <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider" style="color: #1A2F38; width: 15%;">
                       Documents
                     </th>
                   </tr>
@@ -144,7 +190,7 @@ defmodule FaraTrackerWeb.DashboardLive do
                       <td class="px-6 py-5 text-sm font-semibold text-gray-900">
                         <div class="flex items-center">
                           <!-- Expand/Collapse Icon -->
-                          <div class="mr-3 flex-shrink-0">
+                          <div class="mr-3 flex-shrink-0 w-5">
                             <%= if MapSet.member?(@expanded_countries, country.country) do %>
                               <.icon name="hero-chevron-down" class="h-5 w-5 transition-transform duration-200" style="color: #33c1b1;" />
                             <% else %>
@@ -176,9 +222,14 @@ defmodule FaraTrackerWeb.DashboardLive do
                         <%= for agent <- Map.get(@country_agents, country.country, []) do %>
                           <tr class="border-l-4 fara-agent-row-bg fara-transition-slow" style="border-left-color: #33c1b1;">
                             <td class="px-6 py-4 text-sm text-gray-900">
-                              <div class="ml-8 flex flex-col space-y-2">
-                                <div class="font-semibold text-gray-900 text-base"><%= agent.agent_name %></div>
-                                <div class="text-sm text-gray-600 leading-relaxed"><%= agent.foreign_principal %></div>
+                              <div class="flex items-start">
+                                <div class="mr-3 flex-shrink-0 w-5">
+                                  <!-- Empty space to align with icon above -->
+                                </div>
+                                <div class="flex flex-col space-y-2 min-w-0">
+                                  <div class="font-semibold text-gray-900 text-base"><%= agent.agent_name %></div>
+                                  <div class="text-sm text-gray-600 leading-relaxed"><%= agent.foreign_principal %></div>
+                                </div>
                               </div>
                             </td>
                             <td class="px-6 py-4 text-sm text-gray-500">
@@ -210,7 +261,12 @@ defmodule FaraTrackerWeb.DashboardLive do
                       <% else %>
                         <tr class="border-l-4" style="background-color: rgba(26, 47, 56, 0.05); border-left-color: #1A2F38;">
                           <td colspan="5" class="px-6 py-4 text-sm text-gray-500 text-center">
-                            <div class="ml-8 italic">No active agents found for this country</div>
+                            <div class="flex items-center">
+                              <div class="mr-3 flex-shrink-0 w-5">
+                                <!-- Empty space to align with icon above -->
+                              </div>
+                              <div class="italic">No active agents found for this country</div>
+                            </div>
                           </td>
                         </tr>
                       <% end %>

@@ -41,14 +41,24 @@ defmodule CountryDeduper do
     # Step 2: Find duplicates
     duplicates = find_duplicates(country_groups)
 
-    # Step 3: Show what we found
-    show_analysis(country_groups, duplicates)
+    # Step 3: Find ALL CAPS countries that need fixing
+    all_caps_countries = find_all_caps_countries(country_groups)
 
-    # Step 4: Fix duplicates
+    # Step 4: Show what we found
+    show_analysis(country_groups, duplicates, all_caps_countries)
+
+    # Step 5: Fix duplicates
     if length(duplicates) > 0 do
       fix_duplicates(duplicates, dry_run)
     else
       Logger.info("✅ No duplicates found!")
+    end
+
+    # Step 6: Fix ALL CAPS countries
+    if length(all_caps_countries) > 0 do
+      fix_all_caps_countries(all_caps_countries, dry_run)
+    else
+      Logger.info("✅ No ALL CAPS countries found!")
     end
 
     Logger.info("🏁 Deduplication complete")
@@ -88,35 +98,135 @@ defmodule CountryDeduper do
   end
 
   defp pick_canonical(variants) do
-    # Prefer:
-    # 1. Most common variant
-    # 2. Proper case over ALL CAPS or lowercase
-    # 3. Longest version (more descriptive)
+    # Manual overrides for specific cases where we want a particular canonical form
+    canonical_overrides = %{
+      "south korea" => "South Korea",
+      "north korea" => "North Korea",
+      "democratic republic of the congo" => "Democratic Republic of the Congo",
+      "republic of the congo" => "Republic of the Congo",
+      "côte d'ivoire" => "Côte d'Ivoire"
+    }
 
-    variants
-    |> Enum.sort_by(fn variant ->
-      {
-        -variant.count,  # Most common first
-        -score_formatting(variant.original),  # Better formatting first
-        -String.length(variant.original)  # Longer first
-      }
+    normalized = variants |> List.first() |> Map.get(:normalized)
+
+    case Map.get(canonical_overrides, normalized) do
+      nil ->
+        # No override, use normal logic but with capitalization preference
+        canonical = variants
+        |> Enum.sort_by(fn variant ->
+          {
+            -variant.count,  # Most common first
+            -score_formatting(variant.original),  # Better formatting first
+            -String.length(variant.original)  # Longer first
+          }
+        end)
+        |> List.first()
+
+        # If the canonical is ALL CAPS, convert to proper case
+        proper_name = if is_all_caps?(canonical.original) do
+          to_proper_case(canonical.original)
+        else
+          canonical.original
+        end
+
+        %{canonical | original: proper_name}
+
+      override_name ->
+        # Use override, but make sure it exists in variants
+        case Enum.find(variants, fn v -> v.original == override_name end) do
+          nil ->
+            # Override doesn't exist, fall back to normal logic but update original
+            canonical = variants
+            |> Enum.sort_by(fn variant ->
+              {
+                -variant.count,
+                -score_formatting(variant.original),
+                -String.length(variant.original)
+              }
+            end)
+            |> List.first()
+
+            %{canonical | original: override_name}
+
+          found ->
+            found
+        end
+    end
+  end
+
+  defp is_all_caps?(country) do
+    String.match?(country, ~r/^[A-Z][A-Z\s,\.]+$/) && String.length(country) > 2
+  end
+
+  defp to_proper_case(country) do
+    # Handle special cases that shouldn't be title-cased
+    special_words = %{
+      "and" => "and",
+      "of" => "of",
+      "the" => "the",
+      "da" => "da",
+      "de" => "de",
+      "del" => "del",
+      "la" => "la",
+      "le" => "le",
+      "van" => "van",
+      "von" => "von"
+    }
+
+    # Geographic/political terms that should stay uppercase
+    uppercase_words = %{
+      "uk" => "UK",
+      "usa" => "USA",
+      "uae" => "UAE",
+      "arab" => "Arab",  # In context like "United Arab Emirates"
+      "kong" => "Kong",  # In context like "Hong Kong"
+      "st" => "St.",     # Saint abbreviation
+      "st." => "St."
+    }
+
+    country
+    |> String.split()
+    |> Enum.with_index()
+    |> Enum.map(fn {word, index} ->
+      lowered = String.downcase(word)
+
+      cond do
+        # Check for special uppercase words first
+        Map.has_key?(uppercase_words, lowered) ->
+          uppercase_words[lowered]
+
+        # First word is always capitalized
+        index == 0 ->
+          String.capitalize(word)
+
+        # Check for special words that should stay lowercase
+        Map.has_key?(special_words, lowered) ->
+          special_words[lowered]
+
+        # Regular word - capitalize first letter
+        true ->
+          String.capitalize(word)
+      end
     end)
-    |> List.first()
+    |> Enum.join(" ")
   end
 
   defp score_formatting(country) do
     cond do
       # Proper case (first letter caps, rest mixed)
-      String.match?(country, ~r/^[A-Z][a-z]/) -> 3
+      String.match?(country, ~r/^[A-Z][a-z]/) -> 4
 
-      # Title case (multiple words capitalized)
-      String.match?(country, ~r/^[A-Z][a-z].*\s[A-Z][a-z]/) -> 2
+      # Title case (multiple words capitalized properly)
+      String.match?(country, ~r/^[A-Z][a-z].*\s[A-Z][a-z]/) -> 3
 
       # All lowercase
-      String.match?(country, ~r/^[a-z]/) -> 1
+      String.match?(country, ~r/^[a-z]/) -> 2
 
-      # ALL CAPS or mixed - lowest priority
-      true -> 0
+      # ALL CAPS - lowest priority (we want to convert these)
+      is_all_caps?(country) -> 0
+
+      # Mixed or other - middle priority
+      true -> 1
     end
   end
 
@@ -147,12 +257,68 @@ defmodule CountryDeduper do
       name when name in ["china", "people's republic of china", "prc"] ->
         "china"
 
+      # South Korea variations
+      name when name in ["korea south", "korea, south", "south korea", "republic of korea"] ->
+        "south korea"
+
+      # North Korea variations
+      name when name in ["korea north", "korea, north", "north korea", "democratic people's republic of korea", "dprk"] ->
+        "north korea"
+
+      # Democratic Republic of Congo variations
+      name when name in [
+        "democratic republic of congo",
+        "congo democratic republic",
+        "congo democratic republic of the",
+        "congo, democratic republic of the",
+        "democratic republic of the congo",
+        "drc"
+      ] ->
+        "democratic republic of the congo"
+
+      # Republic of Congo variations
+      name when name in [
+        "congo republic",
+        "congo, republic of the",
+        "republic of congo",
+        "republic of the congo"
+      ] ->
+        "republic of the congo"
+
+      # Taiwan variations
+      name when name in ["taiwan", "republic of china", "chinese taipei"] ->
+        "taiwan"
+
+      # Myanmar variations
+      name when name in ["myanmar", "burma"] ->
+        "myanmar"
+
+      # Czech Republic variations
+      name when name in ["czech republic", "czechia"] ->
+        "czech republic"
+
+      # Macedonia variations
+      name when name in ["macedonia", "north macedonia", "former yugoslav republic of macedonia", "fyrom"] ->
+        "north macedonia"
+
+      # Bosnia variations
+      name when name in ["bosnia", "bosnia and herzegovina", "bosnia-herzegovina"] ->
+        "bosnia and herzegovina"
+
+      # Vatican variations
+      name when name in ["vatican", "vatican city", "holy see"] ->
+        "vatican city"
+
+      # Ivory Coast variations
+      name when name in ["ivory coast", "cote d'ivoire", "côte d'ivoire", "cote d'ivoire ivory coast"] ->
+        "côte d'ivoire"
+
       # Keep as-is for everything else
       name -> name
     end
   end
 
-  defp show_analysis(country_groups, duplicates) do
+  defp show_analysis(country_groups, duplicates, all_caps_countries) do
     total_countries = map_size(country_groups)
     unique_countries = country_groups |> Map.values() |> List.flatten() |> length()
 
@@ -160,6 +326,7 @@ defmodule CountryDeduper do
     Logger.info("   Total unique country values: #{unique_countries}")
     Logger.info("   Normalized country count: #{total_countries}")
     Logger.info("   Duplicate groups: #{length(duplicates)}")
+    Logger.info("   ALL CAPS countries: #{length(all_caps_countries)}")
 
     if length(duplicates) > 0 do
       Logger.info("\n🔍 Found duplicates:")
@@ -173,6 +340,14 @@ defmodule CountryDeduper do
         end)
 
         Logger.info("")
+      end)
+    end
+
+    if length(all_caps_countries) > 0 do
+      Logger.info("\n🔍 Found ALL CAPS countries:")
+
+      Enum.each(all_caps_countries, fn country ->
+        Logger.info("   #{country.original} (#{country.count} records)")
       end)
     end
   end
@@ -199,6 +374,49 @@ defmodule CountryDeduper do
         action = if dry_run, do: "Would update", else: "Updated"
         Logger.info("   #{action} #{update_count} records: '#{variant.original}' → '#{dup.canonical}'")
       end)
+    end)
+
+    unless dry_run do
+      Logger.info("✅ Database updated successfully!")
+      Logger.info("💡 Tip: Run the dashboard to verify changes")
+    end
+  end
+
+  defp find_all_caps_countries(country_groups) do
+    country_groups
+    |> Enum.filter(fn {_normalized, variants} ->
+      Enum.all?(variants, fn variant -> is_all_caps?(variant.original) end)
+    end)
+    |> Enum.flat_map(fn {_normalized, variants} ->
+      Enum.map(variants, fn variant ->
+        %{
+          original: variant.original,
+          normalized: variant.normalized,
+          count: variant.count
+        }
+      end)
+    end)
+  end
+
+  defp fix_all_caps_countries(all_caps_countries, dry_run) do
+    Logger.info("🔧 Fixing #{length(all_caps_countries)} ALL CAPS countries...")
+
+    Enum.each(all_caps_countries, fn country ->
+      proper_name = to_proper_case(country.original)
+
+      update_count = if dry_run do
+        # Just count what would be updated
+        from(r in Registration, where: r.country == ^country.original)
+        |> Repo.aggregate(:count, :id)
+      else
+        # Actually update
+        from(r in Registration, where: r.country == ^country.original)
+        |> Repo.update_all(set: [country: proper_name, updated_at: DateTime.utc_now()])
+        |> elem(0)  # Get count from {count, nil} tuple
+      end
+
+      action = if dry_run, do: "Would update", else: "Updated"
+      Logger.info("   #{action} #{update_count} records: '#{country.original}' → '#{proper_name}'")
     end)
 
     unless dry_run do
