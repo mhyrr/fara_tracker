@@ -12,7 +12,7 @@ defmodule FaraScraper do
   Flow:
   1. Read CSV file with all registrant documents
   2. Filter by date (last 10 years) and optionally by agent name
-  3. Download PDF documents
+  3. Download PDF documents (with rate limiting)
   4. Extract data using AI (placeholder for now)
   5. Store in database
   """
@@ -21,9 +21,12 @@ defmodule FaraScraper do
 
   @csv_file "priv/FARA_All_RegistrantDocs.csv"
   @downloads_dir "tmp/fara_downloads"
+  @rate_limit_ms 2000  # 2 seconds between requests - be respectful
+  @user_agent "FARA-Transparency-Tool/1.0 (Public Interest Research)"
 
   def run(opts \\ []) do
     Logger.info("🚀 Starting FARA data collection from CSV...")
+    Logger.info("⏱️  Rate limit: #{@rate_limit_ms}ms between requests")
 
     limit = Keyword.get(opts, :limit, 5)
     agent_filter = Keyword.get(opts, :agent_filter, nil)
@@ -233,11 +236,7 @@ defmodule FaraScraper do
       else
         Logger.info("📥 Downloading: #{doc.url}")
 
-        case Req.get(doc.url,
-          headers: [
-            {"User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"},
-            {"Accept", "application/pdf,*/*"}
-          ],
+        case rate_limited_request(doc.url,
           connect_options: [transport_opts: [verify: :verify_none]],
           max_redirects: 10
         ) do
@@ -292,14 +291,23 @@ defmodule FaraScraper do
       results
       |> Enum.group_by(& &1.extracted_data.agent_name)
       |> Enum.map(fn {_agent_name, docs} ->
-        # Use the most recent document's data
+        # Use the most recent document's data as base
         latest_doc = Enum.max_by(docs, & &1.extracted_data.registration_date, Date)
 
         # Collect all document URLs for this agent
         all_urls = docs |> Enum.map(& &1.document.url) |> Enum.uniq()
 
-        # Merge the latest doc data with all URLs
-        Map.put(latest_doc.extracted_data, :document_urls, all_urls)
+        # Sum all compensation across all documents for this agent
+        total_compensation = docs
+        |> Enum.map(& &1.extracted_data.total_compensation)
+        |> Enum.reduce(Decimal.new("0"), &Decimal.add/2)
+
+        Logger.debug("💰 Agent: #{latest_doc.extracted_data.agent_name}, Documents: #{length(docs)}, Total Compensation: $#{Decimal.to_string(total_compensation)}")
+
+        # Merge the latest doc data with aggregated values
+        latest_doc.extracted_data
+        |> Map.put(:document_urls, all_urls)
+        |> Map.put(:total_compensation, total_compensation)
       end)
 
     success_count =
@@ -308,6 +316,7 @@ defmodule FaraScraper do
       |> Enum.count(&match?({:ok, _}, &1))
 
     Logger.info("✅ Successfully stored #{success_count}/#{length(registrations)} registrations")
+    Logger.info("💰 Compensation aggregation: summed values across all documents per agent")
   end
 
   defp store_single_registration(data) do
@@ -341,6 +350,23 @@ defmodule FaraScraper do
       "Exhibit AB" -> "Legal and regulatory consulting"
       _ -> "Foreign agent services"
     end
+  end
+
+  # Rate-limited HTTP request function
+  defp rate_limited_request(url, opts) do
+    :timer.sleep(@rate_limit_ms)
+
+    default_headers = [
+      {"User-Agent", @user_agent},
+      {"Accept", "application/pdf,*/*"}
+    ]
+
+    headers = Keyword.get(opts, :headers, [])
+    merged_headers = Keyword.merge(default_headers, headers)
+    opts = Keyword.put(opts, :headers, merged_headers)
+
+    Logger.debug("🌐 Making rate-limited request to: #{url}")
+    Req.get(url, opts)
   end
 end
 

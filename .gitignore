@@ -43,6 +43,7 @@ npm-debug.log
 /priv/FARA_All_RegistrantDocs.csv
 /priv/*.csv
 /priv/*.zip
+*.sql
 
 # Environment files with secrets
 .env
