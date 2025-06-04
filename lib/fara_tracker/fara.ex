@@ -98,4 +98,25 @@ defmodule FaraTracker.Fara do
   def change_registration(%Registration{} = registration, attrs \\ %{}) do
     Registration.changeset(registration, attrs)
   end
+
+  @doc """
+  Gets detailed agent information for a specific country.
+  """
+  def get_agents_by_country(country) do
+    query = from r in Registration,
+             where: r.country == ^country and r.status == "active",
+             order_by: [desc: r.registration_date, asc: r.agent_name],
+             select: %{
+               id: r.id,
+               agent_name: r.agent_name,
+               foreign_principal: r.foreign_principal,
+               status: r.status,
+               registration_date: r.registration_date,
+               total_compensation: r.total_compensation,
+               latest_period_end: r.latest_period_end,
+               document_urls: r.document_urls
+             }
+
+    Repo.all(query)
+  end
 end

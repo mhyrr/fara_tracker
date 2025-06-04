@@ -57,14 +57,17 @@ defmodule FaraTracker.PdfProcessor do
   # Basic text extraction from PDF binary
   defp extract_readable_text(pdf_binary) do
     # Extract text between stream objects and clean it up
-    pdf_binary
+    text = pdf_binary
     |> String.split("stream")
     |> Enum.map(&extract_text_chunk/1)
     |> Enum.join(" ")
     |> String.replace(~r/[^\x20-\x7E\s]/, " ")  # Keep only printable ASCII
     |> String.replace(~r/\s+/, " ")              # Normalize whitespace
     |> String.trim()
-    |> String.slice(0, 8000)  # Limit to first 8KB for API efficiency
+    |> String.slice(0, 12000)  # Increase limit to 12KB for better extraction
+
+    Logger.debug("📝 Extracted PDF text (first 500 chars): #{String.slice(text, 0, 500)}")
+    text
   end
 
   defp extract_text_chunk(chunk) do
@@ -88,6 +91,7 @@ defmodule FaraTracker.PdfProcessor do
 
       api_key ->
         openai = OpenaiEx.new(api_key)
+                |> OpenaiEx.with_finch_name(FaraTracker.Finch)
 
         chat_req = OpenaiEx.Chat.Completions.new(
           model: "gpt-4o-mini",
@@ -118,12 +122,29 @@ defmodule FaraTracker.PdfProcessor do
     """
     You are a FARA document analysis expert. Extract key information from Foreign Agent Registration Act documents.
 
+    CRITICAL: Focus on finding foreign principal information. Look specifically for:
+    - Province names (e.g., "Province of Saskatchewan", "Province of Ontario")
+    - Government entities (e.g., "Government of Canada", "Ministry of...", "Department of...")
+    - Country names in any form (e.g., "Canada", "CANADA", "Republic of...", "Kingdom of...")
+    - Foreign corporations or organizations
+    - Any entity that is NOT a US entity
+
+    Common patterns to look for:
+    - "Foreign Principal: [NAME]"
+    - "Name of Foreign Principal: [NAME]"
+    - "Principal: [NAME]"
+    - "On behalf of: [NAME]"
+    - "Representing: [NAME]"
+    - "Client: [NAME]"
+    - Province/state names outside the US
+    - Government departments of foreign countries
+
     Return ONLY a JSON object with these exact fields (no additional text or explanation):
     {
       "agent_name": "string - the registrant/agent name",
       "agent_address": "string - agent's business address",
-      "foreign_principal": "string - the foreign principal name (CRITICAL: look for country names, government entities, or foreign organizations mentioned)",
-      "country": "string - foreign principal's country (CRITICAL: extract country names from the document)",
+      "foreign_principal": "string - the foreign principal name (MUST extract if present - look carefully for provinces, governments, foreign entities)",
+      "country": "string - foreign principal's country (MUST extract if present - look for country names, infer from provinces like Saskatchewan=Canada)",
       "total_compensation": "number - total compensation amount (no $ sign, just number)",
       "services_description": "string - description of services provided",
       "registration_date": "string - registration date in YYYY-MM-DD format",
@@ -132,14 +153,13 @@ defmodule FaraTracker.PdfProcessor do
       "status": "active"
     }
 
-    IMPORTANT: If foreign_principal or country are not explicitly stated, look carefully for:
-    - Country names (Republic of..., Kingdom of..., etc.)
-    - Government entities or ministries
-    - Foreign organizations or companies
-    - Previous registrations referenced in the document
+    EXAMPLES of foreign principals to extract:
+    - "Province of Saskatchewan" → foreign_principal: "Province of Saskatchewan", country: "Canada"
+    - "Government of Canada" → foreign_principal: "Government of Canada", country: "Canada"
+    - "Republic of France" → foreign_principal: "Republic of France", country: "France"
+    - "Toyota Motor Corporation" → foreign_principal: "Toyota Motor Corporation", country: "Japan" (if context suggests it's Japanese)
 
-    For compensation, look for dollar amounts, fees, or payment information.
-    For dates, convert any date format to YYYY-MM-DD.
+    If you cannot find foreign principal information in the text, return empty strings "", do NOT make up information.
     """
   end
 

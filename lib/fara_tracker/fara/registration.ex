@@ -13,6 +13,7 @@ defmodule FaraTracker.Fara.Registration do
     field :latest_period_end, :date
     field :services_description, :string
     field :status, :string, default: "active"
+    field :document_urls, {:array, :string}, default: []
 
     timestamps()
   end
@@ -29,7 +30,8 @@ defmodule FaraTracker.Fara.Registration do
       :latest_period_start,
       :latest_period_end,
       :services_description,
-      :status
+      :status,
+      :document_urls
     ])
     |> validate_required([:agent_name, :foreign_principal, :country])
     |> validate_number(:total_compensation, greater_than_or_equal_to: 0)

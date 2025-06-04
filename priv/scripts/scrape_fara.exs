@@ -152,19 +152,25 @@ defmodule FaraScraper do
     # Filter by document type - focus on substantive documents
     doc_type_ok = is_substantive_document_type(doc.url)
 
-    date_ok and agent_ok and url_ok and doc_type_ok
+    # PRIORITIZE documents with foreign principal data
+    has_foreign_principal = doc.foreign_principal_name != nil and doc.foreign_principal_name != "" and doc.foreign_principal_country != nil and doc.foreign_principal_country != ""
+
+    date_ok and agent_ok and url_ok and doc_type_ok and has_foreign_principal
   end
 
-  # Filter for substantive FARA document types, skip marketing materials
+  # Filter for substantive FARA document types, prioritize those with foreign principal info
   defp is_substantive_document_type(url) when is_binary(url) do
     # Extract document type from URL pattern like:
     # https://efile.fara.gov/docs/XXXX-DocumentType-YYYYMMDD-XX.pdf
     cond do
-      String.contains?(url, "-Supplemental-Statement-") -> true
+      # PRIORITY: Documents with foreign principal details
       String.contains?(url, "-Exhibit-AB-") -> true
-      String.contains?(url, "-Short-Form-") -> true
-      String.contains?(url, "-Amendment-") -> true
       String.contains?(url, "-Registration-Statement-") -> true
+      String.contains?(url, "-Amendment-") -> true
+
+      # SECONDARY: Supplemental statements (often reference existing registrations)
+      String.contains?(url, "-Supplemental-Statement-") -> true
+      String.contains?(url, "-Short-Form-") -> true
 
       # Skip these document types
       String.contains?(url, "-Informational-Materials-") -> false
@@ -272,7 +278,8 @@ defmodule FaraScraper do
       registration_date: doc.date_stamped,
       latest_period_start: Date.add(doc.date_stamped, -90),
       latest_period_end: doc.date_stamped,
-      status: "active"
+      status: "active",
+      document_urls: [doc.url]
     }
   end
 
@@ -287,7 +294,12 @@ defmodule FaraScraper do
       |> Enum.map(fn {_agent_name, docs} ->
         # Use the most recent document's data
         latest_doc = Enum.max_by(docs, & &1.extracted_data.registration_date, Date)
-        latest_doc.extracted_data
+
+        # Collect all document URLs for this agent
+        all_urls = docs |> Enum.map(& &1.document.url) |> Enum.uniq()
+
+        # Merge the latest doc data with all URLs
+        Map.put(latest_doc.extracted_data, :document_urls, all_urls)
       end)
 
     success_count =
