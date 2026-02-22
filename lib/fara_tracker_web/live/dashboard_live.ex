@@ -76,7 +76,7 @@ defmodule FaraTrackerWeb.DashboardLive do
         <!-- Year Filter Tabs -->
         <div class="flex justify-center mb-10">
           <div class="inline-flex rounded-lg p-1 fara-year-tabs">
-            <%= for {year, label} <- [{"all", "All Years"}, {"2025", "2025"}, {"2024", "2024"}, {"2023", "2023"}] do %>
+            <%= for {year, label} <- [{"all", "All Years"}, {"2026", "2026"}, {"2025", "2025"}, {"2024", "2024"}, {"2023", "2023"}] do %>
               <button
                 phx-click="switch_year"
                 phx-value-year={year}

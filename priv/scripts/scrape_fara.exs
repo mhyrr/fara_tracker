@@ -201,6 +201,52 @@ defmodule FaraScraper do
 
   # Step 2: Process individual document
   defp process_document(doc) do
+    # Skip if we already have a registration for this agent/principal pair
+    if already_processed?(doc) do
+      Logger.info("⏭️  Skipping #{doc.registrant_name} / #{doc.foreign_principal_name} - already in DB")
+      nil
+    else
+      process_document_inner(doc)
+    end
+  end
+
+  defp already_processed?(doc) do
+    alias FaraTracker.Fara.Registration
+    import Ecto.Query
+
+    agent = sanitize_utf8(doc.registrant_name)
+    principal = sanitize_utf8(doc.foreign_principal_name)
+
+    agent != nil and principal != nil and
+      FaraTracker.Repo.exists?(
+        from r in Registration,
+          where: r.agent_name == ^agent and r.foreign_principal == ^principal
+      )
+  end
+
+  defp sanitize_utf8(nil), do: nil
+  defp sanitize_utf8(str) when is_binary(str) do
+    if String.valid?(str) do
+      str
+    else
+      # CSV contains Windows-1252 bytes (e.g. 0x92 = right single quote)
+      # Convert to UTF-8
+      str
+      |> :binary.bin_to_list()
+      |> Enum.map(fn
+        0x92 -> ~c"'"
+        0x93 -> ~c"\u201C"
+        0x94 -> ~c"\u201D"
+        0x96 -> ~c"\u2013"
+        0x97 -> ~c"\u2014"
+        byte -> [byte]
+      end)
+      |> List.flatten()
+      |> List.to_string()
+    end
+  end
+
+  defp process_document_inner(doc) do
     # Create downloads directory for this registrant
     registrant_dir = Path.join([@downloads_dir, sanitize_filename(doc.registrant_name)])
     File.mkdir_p!(registrant_dir)

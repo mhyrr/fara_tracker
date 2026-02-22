@@ -155,6 +155,8 @@ defmodule FaraTrackerWeb.AboutLive do
         <div class="mt-8 pt-6 border-t border-gray-200">
           <p class="text-sm text-gray-500">
             <a href="/" class="text-blue-600 hover:text-blue-800 font-medium">← Back to Dashboard</a>
+            <span class="mx-4">•</span>
+            <a href="https://github.com/mhyrr/fara_tracker" target="_blank" class="text-blue-600 hover:text-blue-800 font-medium">View on GitHub</a>
           </p>
         </div>
       </div>

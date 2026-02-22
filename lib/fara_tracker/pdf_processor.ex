@@ -146,6 +146,7 @@ defmodule FaraTracker.PdfProcessor do
       api_key ->
         openai = OpenaiEx.new(api_key)
                 |> OpenaiEx.with_finch_name(FaraTracker.Finch)
+                |> OpenaiEx.with_receive_timeout(60_000)
 
         chat_req = OpenaiEx.Chat.Completions.new(
           model: "gpt-4o-mini",
