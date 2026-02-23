@@ -30,12 +30,13 @@ defmodule FaraScraper do
 
     limit = Keyword.get(opts, :limit, 5)
     agent_filter = Keyword.get(opts, :agent_filter, nil)
+    country_filter = Keyword.get(opts, :country_filter, nil)
     years_back = Keyword.get(opts, :years_back, 10)
     target_year = Keyword.get(opts, :target_year, nil)
 
     try do
       # Step 1: Read and filter CSV data
-      documents = read_and_filter_csv(limit, agent_filter, years_back, target_year)
+      documents = read_and_filter_csv(limit, agent_filter, country_filter, years_back, target_year)
       Logger.info("📋 Found #{length(documents)} documents to process")
 
       if length(documents) == 0 do
@@ -67,7 +68,7 @@ defmodule FaraScraper do
   end
 
   # Step 1: Read CSV and filter data
-  defp read_and_filter_csv(limit, agent_filter, years_back, target_year) do
+  defp read_and_filter_csv(limit, agent_filter, country_filter, years_back, target_year) do
     Logger.info("📖 Reading CSV file: #{@csv_file}")
 
     cutoff_date = case target_year do
@@ -86,7 +87,7 @@ defmodule FaraScraper do
     |> Enum.filter(&(&1 != ""))  # Remove empty lines
     |> Enum.map(&parse_csv_line/1)
     |> Enum.map(&parse_csv_row(&1, headers))
-    |> Enum.filter(&filter_document(&1, cutoff_date, agent_filter, target_year))
+    |> Enum.filter(&filter_document(&1, cutoff_date, agent_filter, country_filter, target_year))
 
     # Apply limit - use all documents if limit is 0 or negative
     if limit > 0 do
@@ -143,7 +144,7 @@ defmodule FaraScraper do
     end
   end
 
-  defp filter_document(doc, cutoff_date, agent_filter, target_year) do
+  defp filter_document(doc, cutoff_date, agent_filter, country_filter, target_year) do
     # Filter by date
     date_ok = case target_year do
       nil -> Date.compare(doc.date_stamped, cutoff_date) != :lt
@@ -162,6 +163,18 @@ defmodule FaraScraper do
       _ -> true
     end
 
+    # Filter by country if specified
+    country_ok = case country_filter do
+      nil -> true
+      filter when is_binary(filter) ->
+        case doc.foreign_principal_country do
+          nil -> false
+          country when is_binary(country) -> String.contains?(String.downcase(country), String.downcase(filter))
+          _ -> false
+        end
+      _ -> true
+    end
+
     # Filter out empty URLs
     url_ok = doc.url != nil and doc.url != "" and is_binary(doc.url)
 
@@ -171,7 +184,7 @@ defmodule FaraScraper do
     # PRIORITIZE documents with foreign principal data
     has_foreign_principal = doc.foreign_principal_name != nil and doc.foreign_principal_name != "" and doc.foreign_principal_country != nil and doc.foreign_principal_country != ""
 
-    date_ok and agent_ok and url_ok and doc_type_ok and has_foreign_principal
+    date_ok and agent_ok and country_ok and url_ok and doc_type_ok and has_foreign_principal
   end
 
   # Filter for substantive FARA document types, prioritize those with foreign principal info
@@ -446,6 +459,7 @@ case System.argv() do
     Options:
       --limit N           Limit to N documents (default: 5, use 0 for no limit)
       --agent AGENT_NAME  Filter to specific agent/firm name (partial match)
+      --country COUNTRY   Filter to specific country (partial match)
       --years N           Look back N years (default: 10)
       --target-year Y     Filter to documents from year Y
       --help              Show this help
@@ -455,6 +469,7 @@ case System.argv() do
       mix run priv/scripts/scrape_fara.exs --limit 10 --years 5
       mix run priv/scripts/scrape_fara.exs --agent "Akin Gump" --limit 2
       mix run priv/scripts/scrape_fara.exs --target-year 2025 --limit 0
+      mix run priv/scripts/scrape_fara.exs --country "Israel" --limit 0
     """)
 
   args ->
@@ -470,6 +485,12 @@ case System.argv() do
 
     agent_filter =
       case Enum.find_index(args, & &1 == "--agent") do
+        nil -> nil
+        index -> Enum.at(args, index + 1)
+      end
+
+    country_filter =
+      case Enum.find_index(args, & &1 == "--country") do
         nil -> nil
         index -> Enum.at(args, index + 1)
       end
@@ -494,7 +515,7 @@ case System.argv() do
           end
       end
 
-    case FaraScraper.run(limit: limit, agent_filter: agent_filter, years_back: years_back, target_year: target_year) do
+    case FaraScraper.run(limit: limit, agent_filter: agent_filter, country_filter: country_filter, years_back: years_back, target_year: target_year) do
       {:ok, count} ->
         IO.puts("✅ Successfully processed #{count} documents")
         System.halt(0)

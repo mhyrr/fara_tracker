@@ -200,7 +200,27 @@ defmodule FaraTracker.PdfProcessor do
     - Any dollar amounts followed by "year", "yearly", "per year", "per annum", "annual"
     - Look in sections like "Compensation", "Thing of Value", "Fees", "Payment", "Exhibit"
 
-    SEARCH AGGRESSIVELY for dollar signs ($) in the text - each one might be compensation!
+    SEARCH AGGRESSIVELY for currency symbols ($, ¥, €, £, etc.) in the text - each one might be compensation!
+
+    CURRENCY HANDLING - CRITICAL:
+    - All compensation MUST be reported in US Dollars (USD)
+    - If amounts are in a foreign currency (¥, €, £, etc.), convert to approximate USD using these rough rates:
+      - ¥ (Japanese Yen): divide by 150 (e.g., ¥247,500,000 → ~$1,650,000)
+      - € (Euro): multiply by 1.08
+      - £ (British Pound): multiply by 1.27
+      - B/. (Panamanian Balboa): 1:1 with USD (e.g., B/.5,715,000 = $5,715,000)
+      - Other currencies: estimate a reasonable USD conversion
+    - Amounts may be written in words (e.g., "FIVE MILLION SEVEN HUNDRED FIFTEEN THOUSAND") - always use the numeric form if also provided
+    - "US$" or "USD" prefixes confirm US Dollars - use as-is
+    - If a currency symbol is ambiguous, look at the country context to determine currency
+
+    AMENDMENT DOUBLE-COUNTING - CRITICAL:
+    - Amendments often RESTATE prior amounts when changing them. Do NOT sum the old and new amounts together.
+    - Example: "references to US$1,500,000 per month are replaced with US$6,000,000 lump sum" → the total is $6,000,000, NOT $7,500,000
+    - Example: "budget pool is increased from US$6,000,000 to US$9,000,000" → the total is $9,000,000, NOT $15,000,000
+    - When an amendment replaces a prior amount, use only the FINAL/NEW amount
+    - When an amendment adds additional budget on top of existing, sum them
+    - Read carefully to distinguish "replaced with" vs "in addition to"
 
     Common patterns to look for:
     - "Foreign Principal: [NAME]"
